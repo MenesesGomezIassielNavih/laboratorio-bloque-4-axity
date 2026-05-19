@@ -1,0 +1,49 @@
+﻿# === Java / Maven / Gradle ===
+target/
+build/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+hs_err_pid*
+.mvn/wrapper/maven-wrapper.jar
+.gradle/
+
+# === Node / Angular ===
+node_modules/
+dist/
+.angular/
+*.tgz
+coverage/
+.nyc_output/
+
+# === IDEs ===
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.code-workspace
+.eclipse/
+.project
+.classpath
+.settings/
+.factorypath
+
+# === Sistema operativo ===
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# === Variables de entorno y secretos ===
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# === Material oficial del curso (no se versiona) ===
+_Material_Oficial/
