@@ -10,6 +10,6 @@ Repositorio correspondiente al laboratorio del **Bloque 4** del programa **Java 
 
 ## Estructura
 
-- ackend/ - Aplicacion Java con Spring Boot.
-- rontend/ - Aplicacion Angular.
+- Backend/ - Aplicacion Java con Spring Boot.
+- Frontend/ - Aplicacion Angular.
 - docs/ - Documentacion del proyecto.
