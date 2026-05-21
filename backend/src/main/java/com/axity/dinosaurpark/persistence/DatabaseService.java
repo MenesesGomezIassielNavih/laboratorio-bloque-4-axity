@@ -12,11 +12,7 @@ import liquibase.resource.ClassLoaderResourceAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Servicio de persistencia para la simulacion.
- * Ejecuta Liquibase programaticamente via CommandScope (API canonica 4.27+)
- * y expone operaciones de insercion con PreparedStatement sobre H2 file mode.
- */
+/** Servicio de persistencia para la simulacion. */
 public class DatabaseService implements AutoCloseable {
 
     private static final Logger LOG = LoggerFactory.getLogger(DatabaseService.class);
@@ -26,16 +22,18 @@ public class DatabaseService implements AutoCloseable {
     private final String user;
     private final String password;
 
+    private Connection conn;
+    private PreparedStatement psInsertRevenue;
+    private PreparedStatement psInsertExpense;
+    private PreparedStatement psInsertEvent;
+    private PreparedStatement psUpsertVehicle;
+
     public DatabaseService(String url, String user, String password) {
         this.url = url;
         this.user = user;
         this.password = password;
     }
 
-    /**
-     * Aplica los changelogs via CommandScope.
-     * Envuelve la API que declara throws Exception en una excepcion de dominio especifica.
-     */
     public void migrate() {
         try {
             Scope.child(Scope.Attr.resourceAccessor.name(),
@@ -54,59 +52,67 @@ public class DatabaseService implements AutoCloseable {
         }
     }
 
+    private void ensureConnected() throws SQLException {
+        if (conn != null && !conn.isClosed()) {
+            return;
+        }
+        conn = DriverManager.getConnection(url, user, password);
+        psInsertRevenue = conn.prepareStatement(
+                "INSERT INTO revenues(type, amount, source) VALUES(?,?,?)");
+        psInsertExpense = conn.prepareStatement(
+                "INSERT INTO expenses(type, amount, description) VALUES(?,?,?)");
+        psInsertEvent = conn.prepareStatement(
+                "INSERT INTO events(event_name, step_number, description) VALUES(?,?,?)");
+        psUpsertVehicle = conn.prepareStatement(
+                "MERGE INTO vehicles(id, status, repair_countdown, updated_at) " +
+                "KEY(id) VALUES(?,?,?,?)");
+        LOG.info("Conexion sostenida abierta a {}", url);
+    }
+
     public void insertRevenue(String type, BigDecimal amount, String source) {
-        final String sql = "INSERT INTO revenues(type, amount, source) VALUES(?,?,?)";
-        try (Connection cn = DriverManager.getConnection(url, user, password);
-             PreparedStatement ps = cn.prepareStatement(sql)) {
-            ps.setString(1, type);
-            ps.setBigDecimal(2, amount);
-            ps.setString(3, source);
-            ps.executeUpdate();
+        try {
+            ensureConnected();
+            psInsertRevenue.setString(1, type);
+            psInsertRevenue.setBigDecimal(2, amount);
+            psInsertRevenue.setString(3, source);
+            psInsertRevenue.executeUpdate();
         } catch (SQLException ex) {
             LOG.error("insertRevenue fallo type={} amount={}", type, amount, ex);
         }
     }
 
     public void insertExpense(String type, BigDecimal amount, String description) {
-        final String sql = "INSERT INTO expenses(type, amount, description) VALUES(?,?,?)";
-        try (Connection cn = DriverManager.getConnection(url, user, password);
-             PreparedStatement ps = cn.prepareStatement(sql)) {
-            ps.setString(1, type);
-            ps.setBigDecimal(2, amount);
-            ps.setString(3, description);
-            ps.executeUpdate();
+        try {
+            ensureConnected();
+            psInsertExpense.setString(1, type);
+            psInsertExpense.setBigDecimal(2, amount);
+            psInsertExpense.setString(3, description);
+            psInsertExpense.executeUpdate();
         } catch (SQLException ex) {
             LOG.error("insertExpense fallo type={} amount={}", type, amount, ex);
         }
     }
 
     public void insertEvent(String eventName, int step, String description) {
-        final String sql = "INSERT INTO events(event_name, step_number, description) VALUES(?,?,?)";
-        try (Connection cn = DriverManager.getConnection(url, user, password);
-             PreparedStatement ps = cn.prepareStatement(sql)) {
-            ps.setString(1, eventName);
-            ps.setInt(2, step);
-            ps.setString(3, description);
-            ps.executeUpdate();
+        try {
+            ensureConnected();
+            psInsertEvent.setString(1, eventName);
+            psInsertEvent.setInt(2, step);
+            psInsertEvent.setString(3, description);
+            psInsertEvent.executeUpdate();
         } catch (SQLException ex) {
             LOG.error("insertEvent fallo eventName={} step={}", eventName, step, ex);
         }
     }
 
-    /**
-     * Upsert de un vehiculo. Usa MERGE INTO de H2 (no portable a MySQL/Postgres sin ajustes).
-     * Para entrega con H2 default es suficiente.
-     */
     public void upsertVehicle(int id, String status, int repairCountdown) {
-        final String sql = "MERGE INTO vehicles(id, status, repair_countdown, updated_at) " +
-                           "KEY(id) VALUES(?,?,?,?)";
-        try (Connection cn = DriverManager.getConnection(url, user, password);
-             PreparedStatement ps = cn.prepareStatement(sql)) {
-            ps.setInt(1, id);
-            ps.setString(2, status);
-            ps.setInt(3, repairCountdown);
-            ps.setTimestamp(4, new Timestamp(System.currentTimeMillis()));
-            ps.executeUpdate();
+        try {
+            ensureConnected();
+            psUpsertVehicle.setInt(1, id);
+            psUpsertVehicle.setString(2, status);
+            psUpsertVehicle.setInt(3, repairCountdown);
+            psUpsertVehicle.setTimestamp(4, new Timestamp(System.currentTimeMillis()));
+            psUpsertVehicle.executeUpdate();
         } catch (SQLException ex) {
             LOG.error("upsertVehicle fallo id={} status={}", id, status, ex);
         }
@@ -114,6 +120,28 @@ public class DatabaseService implements AutoCloseable {
 
     @Override
     public void close() {
-        // H2 en modo file cierra automaticamente al apagar la JVM.
+        closeQuietly(psInsertRevenue, "psInsertRevenue");
+        closeQuietly(psInsertExpense, "psInsertExpense");
+        closeQuietly(psInsertEvent, "psInsertEvent");
+        closeQuietly(psUpsertVehicle, "psUpsertVehicle");
+        if (conn != null) {
+            try {
+                conn.close();
+                LOG.info("Conexion sostenida cerrada");
+            } catch (SQLException ex) {
+                LOG.warn("Fallo al cerrar conexion: {}", ex.getMessage());
+            }
+        }
+    }
+
+    private void closeQuietly(AutoCloseable resource, String name) {
+        if (resource == null) {
+            return;
+        }
+        try {
+            resource.close();
+        } catch (Exception ex) {
+            LOG.warn("Fallo al cerrar {}: {}", name, ex.getMessage());
+        }
     }
 }
