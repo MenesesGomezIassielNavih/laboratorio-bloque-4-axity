@@ -47,3 +47,11 @@ desktop.ini
 
 # === Material oficial del curso (no se versiona) ===
 _Material_Oficial/
+
+# === H2 Database (datos generados en runtime, no se versionan) ===
+data/
+*.mv.db
+*.trace.db
+
+# === Logs adicionales del laboratorio Bloque 4 ===
+logs/
